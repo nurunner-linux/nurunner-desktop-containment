@@ -32,7 +32,7 @@ Item {
     id: appletItem
 
     property int handleWidth: iconSize
-    property int minimumHandleHeight: 6 * (root.iconSize + 6) + margins.top + margins.bottom
+    property int minimumHandleHeight: 7 * (root.iconSize + 7) + margins.top + margins.bottom
     property int handleHeight: (height < minimumHandleHeight) ? minimumHandleHeight : height
     property string category
 
@@ -40,7 +40,7 @@ Item {
     property real controlsOpacity: (plasmoid.immutable || !showAppletHandle) ? 0 : 1
     property string backgroundHints: "NoBackground"
     property bool hasBackground: false
-    property bool handleMerged: (height > minimumHandleHeight)
+    property bool handleMerged: (height > minimumHandleHeight && !appletHandle.forceFloating)
     property bool animationsEnabled: false
 
     property int minimumWidth: Math.max(root.layoutManager.cellSize.width,
@@ -61,8 +61,8 @@ Item {
 
     visible: false
 
-    onMinimumWidthChanged: appletItem.width = Math.max(minimumWidth, width);
-    onMinimumHeightChanged: appletItem.height = Math.max(minimumHeight, height);
+    onMinimumWidthChanged: if (!widthAnimation.running) appletItem.width = Math.max(minimumWidth, width);
+    onMinimumHeightChanged: if (!heightAnimation.running) appletItem.height = Math.max(minimumHeight, height);
 
     function updateBackgroundHints() {
         hasBackground = (applet.backgroundHints != "NoBackground");
@@ -81,8 +81,6 @@ Item {
         }
         //print("Backgroundhints changed: " + appletItem.imagePath);
     }
-
-    Rectangle { color: Qt.rgba(0,0,0,0); border.width: 3; border.color: "white"; opacity: 0.5; visible: debug; anchors.fill: parent; }
 
     KQuickControlsAddons.MouseEventListener {
         id: mouseListener
@@ -104,7 +102,7 @@ Item {
 
         onPressAndHold: {
             if (!plasmoid.immutable && plasmoid.configuration.pressToMove) {
-                if (!dragMouseArea.dragging && !systemSettings.isDrag(pressX, pressY, mouse.x, mouse.y)) {
+                if (!dragMouseArea.dragging && !root.isDrag(pressX, pressY, mouse.x, mouse.y)) {
                     showAppletHandle = true;
 
                     dragMouseArea.dragging = true;
@@ -176,6 +174,7 @@ Item {
 //                     print("Applet removed Applet-" + applet.id)
                     if (applet.id == appletItem.applet.id) {
 //                         print("Destroying Applet-" + applet.id)
+                        root.layoutManager.saveRotation(appletItem);
                         root.layoutManager.setSpaceAvailable(appletItem.x, appletItem.y, appletItem.width, appletItem.height, true)
                         //applet.action("remove").trigger();
                         //appletItem.destroy()
@@ -228,16 +227,14 @@ Item {
                     appletItem.z = appletItem.z + zoffset;
                     animationsEnabled = plasmoid.configuration.pressToMove ? true : false;
                     mouse.accepted = true;
-                    var x = Math.round(appletItem.x / root.layoutManager.cellSize.width) * root.layoutManager.cellSize.width;
-                    var y = Math.round(appletItem.y / root.layoutManager.cellSize.height) * root.layoutManager.cellSize.height;
-                    root.layoutManager.setSpaceAvailable(x, y, appletItem.width, appletItem.height, true);
+                    root.layoutManager.setSpaceAvailable(appletItem.x, appletItem.y, appletItem.width, appletItem.height, true);
 
                     placeHolder.syncWithItem(appletItem);
                     placeHolderPaint.opacity = root.haloOpacity;
                 }
 
                 onPositionChanged: {
-                    var pos = mapToItem(root, mouse.x, mouse.y);
+                    var pos = mapToItem(root.parent, mouse.x, mouse.y);
                     var newCont = plasmoid.containmentAt(pos.x, pos.y);
 
                     if (newCont && newCont != plasmoid) {
@@ -249,8 +246,15 @@ Item {
                     }
                 }
 
-                onCanceled: endDrag()
-                onReleased: endDrag()
+                onCanceled: {
+                    endDrag();
+                    appletHandle.positionHandle();
+                }
+
+                onReleased: {
+                    endDrag();
+                    appletHandle.positionHandle();
+                }
             }
 
             Item {
@@ -328,7 +332,7 @@ Item {
                     anchors.centerIn: parent
                     z: appletContainer.z + 1
                 }
-//                 Rectangle { color: "green"; opacity: 0.3; visible: debug; anchors.fill: parent; }
+
                 Component.onCompleted: PlasmaExtras.AppearAnimation {
                     targetItem: appletItem
                 }
@@ -337,24 +341,60 @@ Item {
             Loader {
                 id: appletHandle
                 z: appletContainer.z + 1
+                property bool forceFloating : false
                 anchors {
                     verticalCenter: parent.verticalCenter
                     right: plasmoidBackground.right
-                    rightMargin: appletItem.margins.right
                 }
                 Connections {
                     target: appletItem
                     onShowAppletHandleChanged: {
-                        if (appletItem.showAppletHandle && appletHandle.source == "") {
-                            //print("Loading applethandle ");
-                            appletHandle.source = "AppletHandle.qml";
+                        if (appletItem.showAppletHandle) {
+                            appletItem.z += dragMouseArea.zoffset;
+                            appletHandle.positionHandle();
+                            if (appletHandle.source == "") {
+                                appletHandle.source = "AppletHandle.qml";
+                            }
+                        } else {
+                            appletItem.z -= dragMouseArea.zoffset;
+                        }
+                    }
+                    onHandleMergedChanged: {
+                        if (appletItem.handleMerged) {
+                            appletHandle.anchors.verticalCenterOffset = 0;
+                        } else {
+                            appletHandle.positionHandle();
                         }
                     }
                 }
+                Connections {
+                    target: appletHandle.item
+                    onMoveFinished: {
+                        appletHandle.positionHandle();
+                    }
+                }
 
+                function positionHandle()
+                {
+                    // Don't show handle outside of desktop
+                    var available = plasmoid.availableScreenRect;
+                    var x = Math.min(Math.max(0, appletItem.x), available.width - appletItem.width);
+                    var y = Math.min(Math.max(0, appletItem.y), available.height - appletItem.height);
+                    var verticalCenter = (y + appletItem.height / 2);
+                    var topOutside = (verticalCenter - minimumHandleHeight / 2);
+                    var bottomOutside = verticalCenter + minimumHandleHeight / 2 - available.height;
+                    if (bottomOutside > 0) {
+                        anchors.verticalCenterOffset = -bottomOutside;
+                    } else if (topOutside < 0) {
+                        anchors.verticalCenterOffset = -topOutside;
+                    } else {
+                        anchors.verticalCenterOffset = 0;
+                    }
+                    var rightOutside = x + appletItem.width + handleWidth - available.width;
+                    appletHandle.anchors.rightMargin = appletItem.margins.right + Math.max(0, rightOutside);
+                    appletHandle.forceFloating = rightOutside > 0;
+                }
             }
-
-//             Rectangle { color: "orange"; opacity: 0.1; visible: debug; anchors.fill: parent; }
         }
     }
 
@@ -399,6 +439,5 @@ Item {
         layoutTimer.running = true
         layoutTimer.restart()
         visible = false
-        // restore rotation
     }
 }

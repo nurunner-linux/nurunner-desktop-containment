@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2014 by Eike Hein <hein@kde.org>                        *
+ *   Copyright (C) 2013-2014 by Eike Hein <hein@kde.org>                   *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -19,53 +19,35 @@
 
 import QtQuick 2.0
 import QtQuick.Layouts 1.1
-import org.kde.plasma.plasmoid 2.0
+
 import org.kde.plasma.core 2.0 as PlasmaCore
-import org.kde.plasma.components 2.0 as PlasmaComponents
-import org.kde.plasma.extras 2.0 as PlasmaExtras
+import org.kde.draganddrop 2.0 as DragDrop
 
-Item {
-    id: tooltipContentItem
+DragDrop.DropArea {
+    property Item folderView: null
 
-    property Item toolTip
+    onDrop: folderView.model.dropCwd(event)
 
-    Layout.minimumWidth: width
-    Layout.minimumHeight: height
-    Layout.maximumWidth: width
-    Layout.maximumHeight: height
-    width: childrenRect.width + units.largeSpacing * 2
-    height: childrenRect.height + units.largeSpacing * 2
+    PlasmaCore.IconItem {
+        id: icon
 
-    Row {
-        x: units.largeSpacing
-        y: x
+        anchors.fill: parent
 
-        spacing: units.largeSpacing
+        active: mouseArea.containsMouse
 
-        PlasmaCore.IconItem {
-            id: icon
+        source: plasmoid.configuration.useCustomIcon ? plasmoid.configuration.icon : folderView.model.iconName
+    }
 
-            anchors.verticalCenter: parent.verticalCenter
+    MouseArea
+    {
+        id: mouseArea
 
-            width: toolTip ? units.iconSizes.medium : 0
-            height: toolTip ? units.iconSizes.medium : 0
+        anchors.fill: parent
 
-            source: toolTip ? toolTip.icon : null
-        }
+        hoverEnabled: true
 
-        Column {
-            spacing: units.smallSpacing
-
-            PlasmaExtras.Heading {
-                level: 3
-                elide: Text.ElideRight
-                text: toolTip ? toolTip.mainText : ""
-            }
-
-            PlasmaComponents.Label {
-                text: toolTip ? toolTip.subText : ""
-                opacity: 0.5
-            }
+        onClicked: {
+            plasmoid.expanded = !plasmoid.expanded;
         }
     }
 }

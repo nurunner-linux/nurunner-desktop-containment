@@ -19,83 +19,90 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA .        *
  ***************************************************************************/
 
-import QtQuick 2.0
+import QtQuick 2.4
+import QtQuick.Layouts 1.1
 
 import org.kde.plasma.plasmoid 2.0
 import org.kde.plasma.core 2.0 as PlasmaCore
 import org.kde.plasma.components 2.0 as PlasmaComponents
 import org.kde.draganddrop 2.0 as DragDrop
+import org.kde.kquickcontrolsaddons 2.0 as KQuickControlsAddons
 
 import org.kde.private.desktopcontainment.desktop 0.1 as Desktop
 
 import "LayoutManager.js" as LayoutManager
+import "FolderTools.js" as FolderTools
 
 DragDrop.DropArea {
     id: root
     objectName: isFolder ? "folder" : "desktop"
 
-    width: {
-        if (isContainment || !folderViewLayer.ready) {
-            return undefined;
-        } else if (isPopup) {
-            return units.gridUnit * 16;
-        }
+    width: isPopup ? undefined : preferredWidth(false) // for the initial size when placed on the desktop
+    Layout.minimumWidth: preferredWidth(true)
+    Layout.preferredWidth: isPopup ? preferredWidth(false) : 0 // for the popup size to change at runtime when view mode changes
+    Plasmoid.switchWidth: preferredWidth(true)
 
-        return (folderViewLayer.view.cellWidth * 3) + (units.largeSpacing * 2);
-    }
+    height: isPopup ? undefined : preferredHeight(false)
+    Layout.minimumHeight: preferredHeight(true)
+    Layout.preferredHeight: isPopup ? preferredHeight(false) : 0
+    Plasmoid.switchHeight: preferredHeight(true)
 
-    height: {
-        if (isContainment || !folderViewLayer.ready) {
-            return undefined;
-        } else if (isPopup) {
-            var height = (folderViewLayer.view.cellHeight * 15) + units.smallSpacing;
-        } else {
-            var height = (folderViewLayer.view.cellHeight * 2) + units.largeSpacing
-        }
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
 
-        if (plasmoid.configuration.labelMode != 0) {
-            height += folderViewLayer.item.labelHeight;
-        }
-
-        return height
-    }
-
-    property bool isFolder: true
+    property bool isFolder: (plasmoid.pluginName == "org.kde.plasma.folder")
     property bool isContainment: ("containmentType" in plasmoid)
     property bool isPopup: (plasmoid.location != PlasmaCore.Types.Floating)
+    property bool useListViewMode: isPopup && plasmoid.configuration.viewMode === 0
 
+    property Component appletAppearanceComponent
     property Item toolBox
     property var layoutManager: LayoutManager
 
-    property bool debug: false
     property int handleDelay: 800
     property real haloOpacity: 0.5
 
-    property int iconSize: 16
+    property int iconSize: units.iconSizes.small
     property int iconWidth: iconSize
     property int iconHeight: iconWidth
 
     preventStealing: true
 
-    Plasmoid.icon: plasmoid.configuration.icon
+    // Plasmoid.title is set by a Binding {} in FolderViewLayer
+    Plasmoid.toolTipSubText: ""
+    Plasmoid.icon: (!plasmoid.configuration.useCustomIcon && folderViewLayer.ready) ? folderViewLayer.view.model.iconName : plasmoid.configuration.icon
+    Plasmoid.compactRepresentation: (isFolder && !isContainment) ? compactRepresentation : null
     Plasmoid.associatedApplicationUrls: folderViewLayer.ready ? folderViewLayer.model.resolvedUrl : null
 
     onIconHeightChanged: updateGridSize()
 
     anchors {
-        leftMargin: plasmoid.availableScreenRect ? plasmoid.availableScreenRect.x : 0
-        topMargin: plasmoid.availableScreenRect ? plasmoid.availableScreenRect.y : 0
+        leftMargin: (isContainment && plasmoid.availableScreenRect) ? plasmoid.availableScreenRect.x : 0
+        topMargin: (isContainment && plasmoid.availableScreenRect) ? plasmoid.availableScreenRect.y : 0
 
         // Don't apply the right margin if the folderView is in column mode and not overflowing.
         // In this way, the last column remains droppable even if a small part of the icon is behind a panel.
         rightMargin: folderViewLayer.ready && (folderViewLayer.view.overflowing  || folderViewLayer.view.flow == GridView.FlowLeftToRight)
-            && plasmoid.availableScreenRect && parent
+            && (isContainment && plasmoid.availableScreenRect) && parent
             ? parent.width - (plasmoid.availableScreenRect.x + plasmoid.availableScreenRect.width) : 0
 
         // Same mechanism as the right margin but applied here to the bottom when the folderView is in row mode.
         bottomMargin: folderViewLayer.ready && (folderViewLayer.view.overflowing || folderViewLayer.view.flow == GridView.FlowTopToBottom)
-            && plasmoid.availableScreenRect && parent
+            && (isContainment && plasmoid.availableScreenRect) && parent
             ? parent.height - (plasmoid.availableScreenRect.y + plasmoid.availableScreenRect.height) : 0
+    }
+
+    Behavior on anchors.topMargin {
+        NumberAnimation { duration: units.longDuration; easing.type: Easing.InOutQuad }
+    }
+    Behavior on anchors.leftMargin {
+        NumberAnimation { duration: units.longDuration; easing.type: Easing.InOutQuad }
+    }
+    Behavior on anchors.rightMargin {
+        NumberAnimation { duration: units.longDuration; easing.type: Easing.InOutQuad }
+    }
+    Behavior on anchors.bottomMargin {
+        NumberAnimation { duration: units.longDuration; easing.type: Easing.InOutQuad }
     }
 
     function updateGridSize()
@@ -116,19 +123,25 @@ DragDrop.DropArea {
     }
 
     function addApplet(applet, x, y) {
-        var component = Qt.createComponent("AppletAppearance.qml");
-        var e = component.errorString();
-        if (e != "") {
-            print("Error loading AppletAppearance.qml: " + component.errorString());
+        if (!appletAppearanceComponent) {
+            appletAppearanceComponent = Qt.createComponent("AppletAppearance.qml");
         }
 
-        var container = component.createObject(resultsFlow)
+        if (appletAppearanceComponent.status !== Component.Ready) {
+            console.warn("Error loading AppletAppearance.qml:", appletAppearanceComponent.errorString());
+            return;
+        }
+
+        var category = "Applet-" + applet.id;
+
+        var container = appletAppearanceComponent.createObject(resultsFlow, {
+            category: category
+        });
 
         applet.parent = container
         applet.visible = true;
 
-        container.category = "Applet-" + applet.id;
-        var config = LayoutManager.itemsConfig[container.category];
+        var config = LayoutManager.itemsConfig[category];
 
         // We have it in the config.
         if (config !== undefined && config.width !== undefined &&
@@ -187,6 +200,8 @@ DragDrop.DropArea {
         if (config !== undefined && config.rotation !== undefined &&
             (config.rotation > 5 || config.rotation < -5)) {
             container.rotation = config.rotation;
+        } else {
+            LayoutManager.restoreRotation(container);
         }
 
         LayoutManager.itemGroups[container.category] = container;
@@ -196,13 +211,50 @@ DragDrop.DropArea {
         }
     }
 
+    function preferredWidth(minimum) {
+        if (isContainment || !folderViewLayer.ready) {
+            return -1;
+        } else if (useListViewMode) {
+            return (minimum ? folderViewLayer.view.cellHeight * 4 : units.gridUnit * 16);
+        }
+
+        return (folderViewLayer.view.cellWidth * (minimum ? 1 : 3)) + (units.largeSpacing * 2);
+    }
+
+    function preferredHeight(minimum) {
+        if (isContainment || !folderViewLayer.ready) {
+            return -1;
+        } else if (useListViewMode) {
+            var height = (folderViewLayer.view.cellHeight * (minimum ? 1 : 15)) + units.smallSpacing;
+        } else {
+            var height = (folderViewLayer.view.cellHeight * (minimum ? 1 : 2)) + units.largeSpacing
+        }
+
+        if (plasmoid.configuration.labelMode != 0) {
+            height += folderViewLayer.item.labelHeight;
+        }
+
+        return height;
+    }
+
+    function isDrag(fromX, fromY, toX, toY) {
+        var length = Math.abs(fromX - toX) + Math.abs(fromY - toY);
+        return length >= Qt.styleHints.startDragDistance;
+    }
+
+    onDragEnter: {
+        if (isContainment && plasmoid.immutable && !(isFolder && FolderTools.isFileDrag(event))) {
+            event.ignore();
+        }
+    }
+
     onDragMove: {
         // TODO: We should reject drag moves onto file items that don't accept drops
         // (cf. QAbstractItemModel::flags() here, but DeclarativeDropArea currently
         // is currently incapable of rejecting drag events.
 
         // Trigger autoscroll.
-        if (isFolder && event.mimeData.hasUrls) {
+        if (isFolder && FolderTools.isFileDrag(event)) {
             folderViewLayer.view.scrollLeft = (event.x < (units.largeSpacing * 3));
             folderViewLayer.view.scrollRight = (event.x > width - (units.largeSpacing * 3));
             folderViewLayer.view.scrollUp = (event.y < (units.largeSpacing * 3));
@@ -210,6 +262,7 @@ DragDrop.DropArea {
         } else if (isContainment) {
             placeHolder.width = LayoutManager.defaultAppletSize.width;
             placeHolder.height = LayoutManager.defaultAppletSize.height;
+            placeHolder.minimumWidth = placeHolder.minimumHeight = 0;
             placeHolder.x = event.x - placeHolder.width / 2;
             placeHolder.y = event.y - placeHolder.width / 2;
             LayoutManager.positionItem(placeHolder);
@@ -220,7 +273,7 @@ DragDrop.DropArea {
 
     onDragLeave: {
         // Cancel autoscroll.
-        if (isFolder && event.mimeData.hasUrls) {
+        if (isFolder) {
             folderViewLayer.view.scrollLeft = false;
             folderViewLayer.view.scrollRight = false;
             folderViewLayer.view.scrollUp = false;
@@ -233,7 +286,7 @@ DragDrop.DropArea {
     }
 
     onDrop: {
-        if (isFolder && event.mimeData.hasUrls) {
+        if (isFolder && FolderTools.isFileDrag(event)) {
             // Cancel autoscroll.
             folderViewLayer.view.scrollLeft = false;
             folderViewLayer.view.scrollRight = false;
@@ -243,9 +296,15 @@ DragDrop.DropArea {
             folderViewLayer.view.drop(root, event, mapToItem(folderViewLayer.view, event.x, event.y));
         } else if (isContainment) {
             placeHolderPaint.opacity = 0;
-            plasmoid.processMimeData(event.mimeData, event.x - placeHolder.width / 2, event.y - placeHolder.height / 2);
+            var pos = root.parent.mapFromItem(resultsFlow, event.x - placeHolder.width / 2, event.y - placeHolder.height / 2);
+            plasmoid.processMimeData(event.mimeData, pos.x, pos.y);
             event.accept(event.proposedAction);
         }
+    }
+
+    Component {
+        id: compactRepresentation
+        CompactRepresentation { folderView: folderViewLayer.view }
     }
 
     Connections {
@@ -337,8 +396,8 @@ DragDrop.DropArea {
         imagePath: "widgets/configuration-icons"
     }
 
-    Desktop.SystemSettings {
-        id: systemSettings
+    KQuickControlsAddons.EventGenerator {
+        id: eventGenerator
     }
 
     MouseArea { // unfocus any plasmoid when clicking empty desktop area
@@ -403,6 +462,8 @@ DragDrop.DropArea {
                 LayoutManager.resetPositions()
                 for (var i=0; i<resultsFlow.children.length; ++i) {
                     var child = resultsFlow.children[i]
+                    if (!child.applet)
+                        continue
                     if (child.enabled) {
                         if (LayoutManager.itemsConfig[child.category]) {
                             var rect = LayoutManager.itemsConfig[child.category]
@@ -461,7 +522,7 @@ DragDrop.DropArea {
             function delayedSyncWithItem() {
                 placeHolder.x = placeHolder.syncItem.x;
                 placeHolder.y = placeHolder.syncItem.y;
-                placeHolder.width = placeHolder.syncItem.width + (plasmoid.immutable ? 0 : syncItem.handleWidth)
+                placeHolder.width = placeHolder.syncItem.width + (plasmoid.immutable || !syncItem.showAppletHandle ? 0 : syncItem.handleWidth)
                 placeHolder.height = placeHolder.syncItem.height;
                 // Only positionItem here, we don't want to save.
                 LayoutManager.positionItem(placeHolder);
@@ -486,7 +547,8 @@ DragDrop.DropArea {
             height: placeHolder.height
             z: 0
 
-            visible: false
+            opacity: 0
+            visible: opacity > 0
 
             Behavior on opacity {
                 NumberAnimation {
@@ -502,13 +564,13 @@ DragDrop.DropArea {
             return;
         }
 
+        plasmoid.action("configure").text = i18n("Configure Desktop");
+
         // WORKAROUND: that's the only place where we can inject a sensible size.
         // if root has width defined, it will override the value we set before
         // the component completes
         root.width = plasmoid.width;
 
-        placeHolderPaint.opacity = 0;
-        placeHolderPaint.visible = true;
         LayoutManager.resultsFlow = resultsFlow;
         LayoutManager.plasmoid = plasmoid;
         updateGridSize();

@@ -79,6 +79,7 @@ Item {
 
         showLayoutActions: !isPopup
         showLockAction: isContainment
+        showIconSizeActions: !root.useListViewMode
 
         onArrangementChanged: {
             plasmoid.configuration.arrangement = arrangement;
@@ -104,6 +105,10 @@ Item {
             plasmoid.configuration.sortDirsFirst = sortDirsFirst;
         }
 
+        onIconSizeChanged: {
+            plasmoid.configuration.iconSize = iconSize;
+        }
+
         Component.onCompleted: {
             arrangement = plasmoid.configuration.arrangement;
             alignment = plasmoid.configuration.alignment;
@@ -111,6 +116,7 @@ Item {
             sortMode = plasmoid.configuration.sortMode;
             sortDesc = plasmoid.configuration.sortDesc;
             sortDirsFirst = plasmoid.configuration.sortDirsFirst;
+            iconSize = plasmoid.configuration.iconSize;
         }
     }
 
@@ -122,12 +128,6 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.Wrap
-    }
-
-    FolderItemToolTipDelegate {
-        id: toolTipDelegate
-
-        visible: false
     }
 
     Connections {
@@ -145,7 +145,7 @@ Item {
         }
 
         onExternalData: {
-            folderView.url = data
+            plasmoid.configuration.url = data
         }
     }
 
@@ -175,6 +175,10 @@ Item {
 
         onSortDirsFirstChanged: {
             viewPropertiesMenu.sortDirsFirst = plasmoid.configuration.sortDirsFirst;
+        }
+
+        onIconSizeChanged: {
+            viewPropertiesMenu.iconSize = plasmoid.configuration.iconSize;
         }
 
         onPositionsChanged: {
@@ -248,6 +252,8 @@ Item {
             }
 
             PlasmaComponents.Label {
+                id: text
+
                 width: parent.width - (windowPin != null ? windowPin.width - units.smallSpacing : 0)
                 height: parent.height
 
@@ -256,6 +262,12 @@ Item {
                 elide: Text.ElideMiddle
                 text: labelGenerator.displayLabel
 
+                Binding {
+                    target: plasmoid
+                    property: "title"
+                    value: labelGenerator.displayLabel
+                }
+
                 Folder.LabelGenerator {
                     id: labelGenerator
 
@@ -263,6 +275,18 @@ Item {
                     rtl: (Qt.application.layoutDirection == Qt.RightToLeft)
                     labelMode: plasmoid.configuration.labelMode
                     labelText: plasmoid.configuration.labelText
+                }
+            }
+
+            MouseArea {
+                anchors.fill: text
+
+                onClicked: {
+                    var action = plasmoid.action("run associated application");
+
+                    if (action) {
+                        action.trigger();
+                    }
                 }
             }
 

@@ -18,7 +18,7 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA .        *
  ***************************************************************************/
 
-import QtQuick 2.0
+import QtQuick 2.4
 import QtQuick.Controls 1.0
 import QtQuick.Dialogs 1.1
 import QtQuick.Layouts 1.0
@@ -40,6 +40,7 @@ Item {
     property bool isPopup: (plasmoid.location != PlasmaCore.Types.Floating)
 
     property string cfg_icon: plasmoid.configuration.icon
+    property alias cfg_useCustomIcon: useCustomIcon.checked
     property alias cfg_arrangement: arrangement.currentIndex
     property alias cfg_alignment: alignment.currentIndex
     property alias cfg_locked: locked.checked
@@ -51,12 +52,9 @@ Item {
     property alias cfg_popups: popups.checked
     property alias cfg_previews: previews.checked
     property alias cfg_previewPlugins: previewPluginsDialog.previewPlugins
+    property alias cfg_viewMode: viewMode.currentIndex
     property alias cfg_iconSize: iconSize.value
     property alias cfg_textLines: textLines.value
-
-    Desktop.SystemSettings {
-        id: systemSettings
-    }
 
     IconDialog {
         id: iconDialog
@@ -78,8 +76,12 @@ Item {
             RowLayout {
                 spacing: units.smallSpacing
 
-                Label {
-                    text: i18n("Icon:")
+                CheckBox {
+                    id: useCustomIcon
+
+                    checked: cfg_useCustomIcon
+
+                    text: i18n("Custom icon:")
                 }
 
                 Button {
@@ -233,14 +235,27 @@ Item {
 
             Layout.fillWidth: true
 
-            visible: !isPopup
-
             title: i18n("Appearance")
 
             flat: true
 
             ColumnLayout {
                 RowLayout {
+                    visible: isPopup
+
+                    Label {
+                        text: i18nc("whether to use icon or list view", "View Mode:")
+                    }
+
+                    ComboBox {
+                        id: viewMode
+                        model: [i18n("List"), i18n("Icons")]
+                    }
+                }
+
+                RowLayout {
+                    visible: !isPopup || viewMode.currentIndex === 1
+
                     Label {
                         text: i18n("Size:")
                     }
@@ -265,6 +280,8 @@ Item {
                 }
 
                 RowLayout {
+                    visible: !isPopup || viewMode.currentIndex === 1
+
                     Label {
                         text: i18n("Text lines:")
                     }
@@ -300,7 +317,7 @@ Item {
                 CheckBox {
                     id: selectionMarkers
 
-                    visible: systemSettings.singleClick()
+                    visible: Qt.styleHints.singleClickActivation
 
                     text: i18n("Selection markers")
                 }

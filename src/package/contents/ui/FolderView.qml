@@ -17,7 +17,7 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA .        *
  ***************************************************************************/
 
-import QtQuick 2.3
+import QtQuick 2.4
 import QtQuick.Layouts 1.1
 import org.kde.plasma.plasmoid 2.0
 
@@ -58,6 +58,13 @@ Item {
     property alias scrollDown: gridView.scrollDown
     property Item upButton: null
 
+    function rename()
+    {
+        if (gridView.currentIndex != -1) {
+            editor.targetItem = gridView.currentItem;
+        }
+    }
+
     function linkHere(sourceUrl) {
         dir.linkHere(sourceUrl);
     }
@@ -70,7 +77,8 @@ Item {
                 return -1;
             }
 
-            var hPos = mapToItem(item.hoverArea, pos.x, pos.y);
+            var hOffset = Math.abs(Math.min(gridView.contentX, gridView.originX));
+            var hPos = mapToItem(item.hoverArea, pos.x + hOffset, pos.y);
 
             if ((hPos.x < 0 || hPos.y < 0 || hPos.x > item.hoverArea.width || hPos.y > item.hoverArea.height)) {
                 return -1;
@@ -101,7 +109,7 @@ Item {
         target: root
 
         onIsPopupChanged: {
-            if (upButton == null && root.isPopup) {
+            if (upButton == null && root.useListViewMode) {
                 upButton = makeUpButton();
             } else if (upButton != null) {
                 upButton.destroy();
@@ -129,10 +137,10 @@ Item {
 
         acceptedButtons: {
             if (hoveredItem == null && main.isRootView) {
-                return root.isPopup ? (Qt.LeftButton | Qt.MiddleButton) : Qt.LeftButton;
+                return root.isPopup ? (Qt.LeftButton | Qt.MiddleButton | Qt.BackButton) : Qt.LeftButton;
             }
 
-            return root.isPopup ? (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)
+            return root.isPopup ? (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton | Qt.BackButton)
                 : (Qt.LeftButton | Qt.RightButton);
         }
 
@@ -153,6 +161,14 @@ Item {
             }
 
             scrollArea.focus = true;
+
+            if (mouse.buttons & Qt.BackButton) {
+                if (root.isPopup && dir.resolvedUrl != dir.resolve(plasmoid.configuration.url)) {
+                    dir.up();
+                }
+
+                return;
+            }
 
             if (childAt(mouse.x, mouse.y) != editor) {
                 editor.targetItem = null;
@@ -197,7 +213,12 @@ Item {
                     gridView.currentIndex = hoveredItem.index;
 
                     if (mouse.buttons & Qt.RightButton) {
+                        if (pressedItem.toolTip && pressedItem.toolTip.active) {
+                            pressedItem.toolTip.hideToolTip();
+                        }
+
                         clearPressState();
+
                         dir.openContextMenu();
                     }
                 }
@@ -212,7 +233,8 @@ Item {
         onClicked: {
             clearPressState();
 
-            if (mouse.buttons & Qt.RightButton) {
+            if (mouse.buttons & Qt.RightButton ||
+                childAt(mouse.x, mouse.y) == editor) {
                 return;
             }
 
@@ -223,14 +245,14 @@ Item {
             var pos = mapToItem(hoveredItem.actionsOverlay, mouse.x, mouse.y);
 
             if (!(pos.x <= hoveredItem.actionsOverlay.width && pos.y <= hoveredItem.actionsOverlay.height)) {
-                if (systemSettings.singleClick() || doubleClickInProgress) {
-                    var func = root.isPopup && (mouse.button == Qt.LeftButton) && hoveredItem.isDir ? dir.cd : dir.run;
+                if (Qt.styleHints.singleClickActivation || doubleClickInProgress) {
+                    var func = root.useListViewMode && (mouse.button == Qt.LeftButton) && hoveredItem.isDir ? dir.cd : dir.run;
                     func(positioner.map(gridView.currentIndex));
 
                     hoveredItem = null;
                 } else {
                     doubleClickInProgress = true;
-                    doubleClickTimer.interval = systemSettings.doubleClickInterval();
+                    doubleClickTimer.interval = Qt.styleHints.mouseDoubleClickInterval;
                     doubleClickTimer.start();
                 }
             }
@@ -294,8 +316,9 @@ Item {
             }
 
             // Drag initiation.
-            if (pressX != -1 && systemSettings.isDrag(pressX, pressY, mouse.x, mouse.y)) {
+            if (pressX != -1 && root.isDrag(pressX, pressY, mouse.x, mouse.y)) {
                 if (pressedItem != null && dir.isSelected(positioner.map(pressedItem.index))) {
+                    pressedItem.toolTip.hideToolTip();
                     dragX = mouse.x;
                     dragY = mouse.y;
                     dir.dragSelected(mouse.x, mouse.y);
@@ -304,7 +327,7 @@ Item {
                     clearPressState();
                 } else {
                     // Disable rubberband in popup list view mode.
-                    if (root.isPopup) {
+                    if (root.useListViewMode) {
                         return;
                     }
 
@@ -391,7 +414,7 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
 
                 cellWidth: {
-                    if (root.isPopup) {
+                    if (root.useListViewMode) {
                         return gridView.width;
                     }
 
@@ -399,7 +422,7 @@ Item {
                 }
 
                 cellHeight: {
-                    if (root.isPopup) {
+                    if (root.useListViewMode) {
                         return Math.ceil((Math.max(theme.mSize(theme.defaultFont).height, iconSize)
                             + Math.max(highlightItemSvg.margins.top + highlightItemSvg.margins.bottom,
                             listItemSvg.margins.top + listItemSvg.margins.bottom)) / 2) * 2;
@@ -540,7 +563,7 @@ Item {
                 }
 
                 function makeIconSize() {
-                    if (root.isPopup) {
+                    if (root.useListViewMode) {
                         return units.iconSizes.small;
                     }
 
@@ -590,7 +613,7 @@ Item {
                             var itemX = ((rows ? i : s) * gridView.cellWidth);
                             var itemY = ((rows ? s : i) * gridView.cellHeight);
 
-                            if (gridView.layoutDirection == Qt.RightToLeft) {
+                            if (gridView.effectiveLayoutDirection == Qt.RightToLeft) {
                                 itemX -= (rows ? gridView.contentX : gridView.originX);
                                 itemX += cWidth;
                                 itemX = (rows ? gridView.width : gridView.contentItem.width) - itemX;
@@ -635,8 +658,8 @@ Item {
                 Behavior on contentY { id: smoothY; enabled: false; SmoothedAnimation { velocity: 700 } }
 
                 Keys.onReturnPressed: {
-                    if (currentIndex != -1) {
-                        var func = root.isPopup ? dir.cd : dir.run;
+                    if (currentIndex != -1 && dir.hasSelection()) {
+                        var func = root.useListViewMode ? dir.cd : dir.run;
                         func(positioner.map(currentIndex));
                     }
                 }
@@ -645,9 +668,22 @@ Item {
                     // FIXME TODO: Correct popup position.
                     return;
 
-                    if (currentIndex != -1) {
+                    if (currentIndex != -1 && dir.hasSelection()) {
                         dir.setSelected(positioner.map(currentIndex));
                         dir.openContextMenu();
+                    }
+                }
+
+                Folder.ShortCut {
+                    Component.onCompleted: {
+                        installAsEventFilterFor(gridView);
+                    }
+
+                    onDeleteFile: {
+                        dir.deleteSelected();
+                    }
+                    onRenameFile: {
+                        rename();
                     }
                 }
 
@@ -670,6 +706,12 @@ Item {
                     } else if (event.key == Qt.Key_End) {
                         currentIndex = count - 1;
                         updateSelection(event.modifiers);
+                    } else if (event.matches(StandardKey.Copy)) {
+                        dir.copy();
+                    } else if (event.matches(StandardKey.Paste)) {
+                        dir.paste();
+                    } else if (event.matches(StandardKey.Cut)) {
+                        dir.cut();
                     }
                 }
 
@@ -683,9 +725,11 @@ Item {
                 }
 
                 Keys.onLeftPressed: {
-                    if (positioner.enabled) {
+                    if (root.isPopup && dir.resolvedUrl != dir.resolve(plasmoid.configuration.url)) {
+                        dir.up();
+                    } else if (positioner.enabled) {
                         var newIndex = positioner.nearestItem(currentIndex,
-                            FolderTools.effectiveNavDirection(gridView.flow, gridView.layoutDirection, Qt.LeftArrow));
+                            FolderTools.effectiveNavDirection(gridView.flow, gridView.effectiveLayoutDirection, Qt.LeftArrow));
 
                         if (newIndex != -1) {
                             currentIndex = newIndex;
@@ -705,9 +749,12 @@ Item {
                 }
 
                 Keys.onRightPressed: {
-                    if (positioner.enabled) {
+                    if (root.isPopup && currentIndex != -1 && dir.hasSelection()) {
+                        var func = root.isPopup ? dir.cd : dir.run;
+                        func(positioner.map(currentIndex));
+                    } else if (positioner.enabled) {
                         var newIndex = positioner.nearestItem(currentIndex,
-                            FolderTools.effectiveNavDirection(gridView.flow, gridView.layoutDirection, Qt.RightArrow));
+                            FolderTools.effectiveNavDirection(gridView.flow, gridView.effectiveLayoutDirection, Qt.RightArrow));
 
                         if (newIndex != -1) {
                             currentIndex = newIndex;
@@ -729,7 +776,7 @@ Item {
                 Keys.onUpPressed: {
                     if (positioner.enabled) {
                         var newIndex = positioner.nearestItem(currentIndex,
-                            FolderTools.effectiveNavDirection(gridView.flow, gridView.layoutDirection, Qt.UpArrow));
+                            FolderTools.effectiveNavDirection(gridView.flow, gridView.effectiveLayoutDirection, Qt.UpArrow));
 
                         if (newIndex != -1) {
                             currentIndex = newIndex;
@@ -751,7 +798,7 @@ Item {
                 Keys.onDownPressed: {
                     if (positioner.enabled) {
                         var newIndex = positioner.nearestItem(currentIndex,
-                            FolderTools.effectiveNavDirection(gridView.flow, gridView.layoutDirection, Qt.DownArrow));
+                            FolderTools.effectiveNavDirection(gridView.flow, gridView.effectiveLayoutDirection, Qt.DownArrow));
 
                         if (newIndex != -1) {
                             currentIndex = newIndex;
@@ -767,6 +814,12 @@ Item {
                         }
 
                         updateSelection(event.modifiers);
+                    }
+                }
+
+                Keys.onBackPressed: {
+                    if (root.isPopup && dir.resolvedUrl != dir.resolve(plasmoid.configuration.url)) {
+                        dir.up();
                     }
                 }
 
@@ -835,10 +888,10 @@ Item {
                         continue;
                     }
 
-                    itemX = dropPos.x + offset.x + (listener.dragX % cellWidth);
-                    itemY = dropPos.y + offset.y + (listener.dragY % cellHeight);
+                    itemX = dropPos.x + offset.x + (listener.dragX % cellWidth) + (cellWidth / 2);
+                    itemY = dropPos.y + offset.y + (listener.dragY % cellHeight) + (cellHeight / 2);
 
-                    if (gridView.layoutDirection == Qt.RightToLeft) {
+                    if (gridView.effectiveLayoutDirection == Qt.RightToLeft) {
                         itemX -= (rows ? gridView.contentX : gridView.originX);
                         itemX = (rows ? gridView.width : gridView.contentItem.width) - itemX;
                     }
@@ -895,29 +948,34 @@ Item {
             }
         }
 
-        function rename()
-        {
-            if (gridView.currentIndex != -1) {
-                editor.targetItem = gridView.currentItem;
-            }
-        }
-
-        PlasmaComponents.TextField {
+        PlasmaComponents.TextArea {
             id: editor
 
             visible: false
+
+            wrapMode: isPopup ? TextEdit.NoWrap : TextEdit.Wrap
+            
+            textMargin: 0
+            
+            horizontalAlignment: isPopup ? TextEdit.AlignHLeft : TextEdit.AlignHCenter
 
             property Item targetItem: null
 
             onTargetItemChanged: {
                 if (targetItem != null) {
-                    var pos = main.mapFromItem(targetItem, targetItem.labelArea.x, targetItem.labelArea.y);
-                    x = pos.x + (units.smallSpacing * 2);
-                    y = pos.y + (units.smallSpacing * 2);
-                    width = targetItem.labelArea.width;
-                    height = targetItem.labelArea.height;
+                    var xy = getXY();
+                    x = xy[0];
+                    y = xy[1];
+                    width = getWidth();
+                    height = getInitHeight();
                     text = targetItem.label.text;
-                    editor.selectAll();
+                    adjustSize();
+                    editor.select(0, dir.fileExtensionBoundary(positioner.map(targetItem.index)));
+                    if(isPopup) {
+                        flickableItem.contentX = Math.max(flickableItem.contentWidth - contentItem.width, 0);
+                    } else {
+                        flickableItem.contentY = Math.max(flickableItem.contentHeight - contentItem.height, 0);
+                    }
                     visible = true;
                 } else {
                     x: 0
@@ -925,7 +983,7 @@ Item {
                     visible = false;
                 }
             }
-
+            
             onVisibleChanged: {
                 if (visible) {
                     focus = true;
@@ -934,10 +992,91 @@ Item {
                 }
             }
 
-            onAccepted: {
-                dir.rename(positioner.map(targetItem.index), text);
-                targetItem = null;
+            Keys.onPressed: {
+                switch(event.key) {
+                case Qt.Key_Return:
+                case Qt.Key_Enter:
+                    dir.rename(positioner.map(targetItem.index), text);
+                    targetItem = null;
+                    break;
+                case Qt.Key_Escape:
+                    targetItem = null;
+                    break;
+                case Qt.Key_Home:
+                    editor.select(0, 0);
+                    break;
+                case Qt.Key_End:
+                    editor.select(text.length, text.length);
+                    break;
+                default:
+                    adjustSize();
+                    break;
+                }
             }
+
+            Keys.onReleased: {
+                adjustSize();
+            }
+            
+            function getXY() {
+                var pos = main.mapFromItem(targetItem, targetItem.labelArea.x, targetItem.labelArea.y);
+                var _x, _y;
+                if(isPopup) {
+                   _x = targetItem.labelArea.x - __style.padding.left;
+                   _y = pos.y - __style.padding.top;
+                } else {
+                   _x = targetItem.x + units.largeSpacing + units.smallSpacing - __style.padding.left;
+                   _y = pos.y + units.smallSpacing - __style.padding.top;
+                }
+                return([ _x, _y ]);
+            }
+            
+            function getWidth(addWidthVerticalScroller) {
+                return(targetItem.width - units.largeSpacing * 2 - (isPopup ? 0 : units.smallSpacing * 2) + __style.padding.left + __style.padding.right + 
+                       (addWidthVerticalScroller ? __verticalScrollBar.parent.verticalScrollbarOffset : 0));
+            }
+            
+            function getHeight(addWidthHoriozontalScroller, init) {
+                var _height;
+                if(isPopup || init) {
+                    _height = targetItem.labelArea.height + __style.padding.top + __style.padding.bottom;
+                } else {
+                    _height = height;
+                    if(contentHeight + __style.padding.top + __style.padding.bottom > _height) {
+                        var maxHeight = Math.max(_height, theme.mSize(theme.defaultFont).height * (plasmoid.configuration.textLines + 1) + __style.padding.top + __style.padding.bottom);
+                        _height = Math.min(maxHeight, contentHeight + __style.padding.top + __style.padding.bottom);
+                    }
+                }
+                return(_height + (addWidthHoriozontalScroller ? __horizontalScrollBar.parent.horizontalScrollbarOffset : 0));
+            }
+            
+            function getInitHeight() {
+                return(getHeight(false, true));
+            }
+            
+            function adjustSize() {
+                if(isPopup) {
+                    if(contentWidth + __style.padding.left + __style.padding.right > width) {
+                        visible = true;
+                        horizontalScrollBarPolicy = Qt.ScrollBarAlwaysOn;
+                        height = getHeight(true);
+                    } else {
+                        horizontalScrollBarPolicy = Qt.ScrollBarAlwaysOff;
+                        height = getHeight();
+                    }
+                } else {
+                    height = getHeight();
+                    if(contentHeight + __style.padding.top + __style.padding.bottom > height) {
+                        visible = true;
+                        verticalScrollBarPolicy = Qt.ScrollBarAlwaysOn;
+                        width = getWidth(true);
+                    } else {
+                        verticalScrollBarPolicy = Qt.ScrollBarAlwaysOff;
+                        width = getWidth();
+                    }
+                }
+            }
+            
         }
 
         Component.onCompleted: {
@@ -946,7 +1085,7 @@ Item {
     }
 
     Component.onCompleted: {
-        if (upButton == null && root.isPopup) {
+        if (upButton == null && root.useListViewMode) {
             upButton = makeUpButton();
         }
     }

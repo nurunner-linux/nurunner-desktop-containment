@@ -20,8 +20,8 @@
 var positions = []
 
 var cellSize = {
-    width: 24,
-    height: 24
+    width: units.gridUnit,
+    height: units.gridUnit
 }
 
 var defaultAppletSize = {
@@ -32,6 +32,7 @@ var defaultAppletSize = {
 var resultsFlow
 var plasmoid;
 var itemsConfig
+var rotations = {}
 
 //bookkeeping for the item groups
 var itemGroups = {}
@@ -116,14 +117,8 @@ function availableSpace(x, y, width, height)
     if (x < 0 || y < 0) {
         return availableSize;
     }
-    if (positions[row] === undefined) {
-        return {
-            width: width - Math.max(0, (x + width) - resultsFlow.width),
-            height: height
-        }
-    }
 
-    if (!positions[row][column]) {
+    if (positions[row] === undefined || !positions[row][column]) {
         for (var w = 0; w < rowsWidth; ++w) {
             if (positions[row + w] && positions[row + w][column]) {
                 break;
@@ -184,6 +179,14 @@ function setSpaceAvailable(x, y, width, height, available)
     }
 }
 
+function adjustItemSizeToAvailableScreenRegion(x, y, width, height)
+{
+    var pos = root.mapToItem(root.parent, x, y);
+    pos = plasmoid.adjustToAvailableScreenRegion(pos.x, pos.y, width, height);
+    pos = root.mapFromItem(root.parent, pos.x, pos.y);
+    return pos;
+}
+
 function normalizeItemPosition(item)
 {
     var x = Math.max(0, Math.round(item.x/cellSize.width)*cellSize.width)
@@ -192,7 +195,7 @@ function normalizeItemPosition(item)
     var width = Math.max(cellSize.width, Math.round(item.width/cellSize.width)*cellSize.width)
     var height = Math.max(cellSize.height, Math.round(item.height/cellSize.height)*cellSize.height)
 
-    var pos = plasmoid.adjustToAvailableScreenRegion(x, y, width, height);
+    var pos = adjustItemSizeToAvailableScreenRegion(x, y, width, height);
     item.x = pos.x;
     item.y = pos.y;
 
@@ -205,7 +208,7 @@ function positionItem(item)
     var x = Math.max(0, Math.round(item.x/cellSize.width)*cellSize.width)
     var y = Math.max(0, Math.round(item.y/cellSize.height)*cellSize.height)
 
-    var pos = plasmoid.adjustToAvailableScreenRegion(x, y, item.width, item.height);
+    var pos = adjustItemSizeToAvailableScreenRegion(x, y, item.width, item.height);
     x = pos.x;
     y = pos.y;
 
@@ -305,5 +308,16 @@ function saveItem(item) {
         //print("-- Saving rotation : " + rect.rotation);
         itemsConfig[item.category] = rect
     }
+}
 
+function saveRotation(item) {
+    if (item.category) {
+        rotations[item.category] = item.rotation;
+    }
+}
+
+function restoreRotation(item) {
+    if (item.category && rotations[item.category]) {
+        item.rotation = rotations[item.category];
+    }
 }
